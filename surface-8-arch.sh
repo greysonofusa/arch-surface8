@@ -34,18 +34,25 @@ echo "Partitioning disk..."
 wipefs -af "$DISK"
 sgdisk -Z "$DISK"
 
-sgdisk -n 1:0:+1G -t 1:ef00 "$DISK"
-sgdisk -n 2:0:0   -t 2:8e00 "$DISK"
+# Create partitions
+sgdisk -n 1:0:+1G -t 1:ef00 "$DISK"  # EFI Partition
+sgdisk -n 2:0:0   -t 2:8e00 "$DISK"  # Main Partition
 
 partprobe "$DISK"
 
 ### FILESYSTEMS ###
-mkfs.fat -F32 "${DISK}p1"
+mkfs.fat -F32 "${DISK}p1"  # Format the EFI partition
 
+# Initialize the physical volume on the second partition
 pvcreate "${DISK}p2"
+
+# Create the volume group
 vgcreate "$VG" "${DISK}p2"
+
+# Create the logical volume
 lvcreate -l 100%FREE -n "$LV" "$VG"
 
+# Format the logical volume with F2FS
 mkfs.f2fs "/dev/$VG/$LV"
 
 ### MOUNTS ###
@@ -62,7 +69,14 @@ pacstrap /mnt \
   vim \
   networkmanager \
   sbctl \
-  efibootmgr
+  efibootmgr \
+  ufw \
+  wireguard-tools \
+  firefox \
+  ffmpeg \
+  gstreamer \
+  libva-intel-driver \
+  libva-vdpau-driver  # Added drivers for Intel VA and VDPAU support
 
 genfstab -U /mnt >> /mnt/etc/fstab
 
@@ -192,6 +206,18 @@ sbctl enroll-keys --microsoft
 sbctl sign /efi/EFI/Linux/arch-linux-surface.efi
 
 bootctl install
+
+### UFW CONFIG ###
+# Set up UFW default rules: deny incoming, allow outgoing
+ufw default deny incoming
+ufw default allow outgoing
+
+# Allow SSH (optional, only if you need remote access)
+ufw allow ssh
+
+# Enable UFW to start on boot
+systemctl enable ufw
+ufw enable
 
 EOF
 
