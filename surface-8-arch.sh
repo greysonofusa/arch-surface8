@@ -44,16 +44,16 @@ partprobe "$DISK"
 mkfs.fat -F32 "${DISK}p1"  # Format the EFI partition
 
 # Initialize the physical volume on the second partition
-pvcreate "${DISK}p2"
+pvcreate "${DISK}p2"  # Initialize the physical volume
 
 # Create the volume group
-vgcreate "$VG" "${DISK}p2"
+vgcreate "$VG" "${DISK}p2"  # Create the volume group
 
 # Create the logical volume
-lvcreate -l 100%FREE -n "$LV" "$VG"
+lvcreate -l 100%FREE -n "$LV" "$VG"  # Create the logical volume
 
 # Format the logical volume with F2FS
-mkfs.f2fs "/dev/$VG/$LV"
+mkfs.f2fs "/dev/$VG/$LV"  # Format the logical volume with F2FS
 
 ### MOUNTS ###
 mount "/dev/$VG/$LV" /mnt
