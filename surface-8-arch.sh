@@ -44,7 +44,7 @@ partprobe "$DISK"
 mkfs.fat -F32 "${DISK}p1"  # Format the EFI partition
 
 # Initialize the physical volume on the second partition
-pvcreate "${DISK}p2"  # Initialize the physical volume
+pvcreate -ff "${DISK}p2"  # Initialize the physical volume with -ff flag
 
 # Create the volume group
 vgcreate "$VG" "${DISK}p2"  # Create the volume group
