@@ -1,245 +1,35 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-### SAFETY CHECK ###
-[[ "$(id -u)" -eq 0 ]] || { echo "Run as root"; exit 1; }
-
-DISK="/dev/nvme0n1"
-VG="ArchVG"
-LV="root"
-
-echo "=== Surface Pro 8 Arch Installer ==="
-
-### USER INPUT ###
-read -rp "Enter hostname: " HOSTNAME
-read -rp "Enter username: " USERNAME
-
-echo "Set ROOT password:"
-passwd
-
-echo "Set password for $USERNAME:"
-read -rsp "Password: " USERPASS
-echo
-read -rsp "Confirm: " CONFIRM
-echo
-[[ "$USERPASS" == "$CONFIRM" ]] || { echo "Passwords do not match"; exit 1; }
-
-read -rp "Grant $USERNAME sudo privileges? (y/n): " SUDO_OK
-
-### TIME SYNC ###
-timedatectl set-ntp true
-
-### DISK PARTITIONING ###
-echo "Partitioning disk..."
-
-# Wipe existing partitions and partition table
-wipefs -af "$DISK"
-sgdisk -Z "$DISK"
-
-# Create partitions
-# /boot partition: 1GiB, FAT32
-sgdisk -n 1:0:+1G -t 1:ef00 "$DISK"
-
-# /EFI partition: 1GiB, FAT32
-sgdisk -n 2:0:+1G -t 1:ef00 "$DISK"
-
-# Swap partition: 16GiB
-sgdisk -n 3:0:+16G -t 3:8200 "$DISK"
-
-# Root partition: F2FS, using the remaining space (except for 1GiB free)
-sgdisk -n 4:0:0 -t 4:8300 "$DISK"
-
-partprobe "$DISK"
-
-# List created partitions
-lsblk "$DISK"
-
-### FILESYSTEMS ###
-# Format /boot and /EFI as FAT32
-mkfs.fat -F32 "${DISK}p1"  # /boot
-mkfs.fat -F32 "${DISK}p2"  # /EFI
-
-# Format the swap partition
-mkswap "${DISK}p3"
-swapon "${DISK}p3"
-
-# Format the root partition with F2FS
-mkfs.f2fs "${DISK}p4"  # Root partition
-
-### MOUNTS ###
-# Mount root partition
-mount "${DISK}p4" /mnt
-
-# Create and mount EFI partition
-mkdir -p /mnt/efi
-mount "${DISK}p2" /mnt/efi
-
-# Create /boot partition mount point and mount it
-mkdir -p /mnt/boot
-mount "${DISK}p1" /mnt/boot
-
-### BASE INSTALL ###
-pacstrap /mnt \
-  base base-devel \
-  linux-firmware \
-  sudo \
-  git \
-  vim \
-  networkmanager \
-  sbctl \
-  efibootmgr \
-  ufw \
-  wireguard-tools \
-  firefox \
-  ffmpeg \
-  gstreamer \
-  libva-intel-driver \
-  libva-vdpau-driver  # Added drivers for Intel VA and VDPAU support
-
-genfstab -U /mnt >> /mnt/etc/fstab
-
-### CHROOT ###
-arch-chroot /mnt /bin/bash <<EOF
-
-set -e
-
-### SYSTEM CONFIG ###
-echo "$HOSTNAME" > /etc/hostname
-
-ln -sf /usr/share/zoneinfo/America/Chicago /etc/localtime
-hwclock --systohc
-
-sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
-locale-gen
-
-echo "LANG=en_US.UTF-8" > /etc/locale.conf
-echo "KEYMAP=us" > /etc/vconsole.conf
-
-### USERS ###
-useradd -m -G wheel $USERNAME
-echo "$USERNAME:$USERPASS" | chpasswd
-
-if [[ "$SUDO_OK" =~ ^[Yy]$ ]]; then
-  sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
-fi
-
-### NETWORK ###
-systemctl enable NetworkManager
-
-### LINUX-SURFACE KEYS ###
+su
+#Enter Super User Password!
+pacman -Syy
+pacman -S --no-confirm ufw git NetworkManager curl nano
 curl -s https://raw.githubusercontent.com/linux-surface/linux-surface/master/pkg/keys/surface.asc \
-  | pacman-key --add -
-
-pacman-key --finger 56C464BAAC421453
-pacman-key --lsign-key 56C464BAAC421453
-
-cat <<SURFACE >> /etc/pacman.conf
-
+    | pacman-key --add -
+    pacman-key --finger 56C464BAAC421453
+    pacman-key --lsign-key 56C464BAAC421453  
+cat > /etc/pacman.conf <<EOF
 [linux-surface]
 Server = https://pkg.surfacelinux.com/arch/
-SURFACE
-
-pacman -Syu --noconfirm
-
-### KERNEL + FIRMWARE ###
-pacman -S --noconfirm \
-  linux-surface \
-  linux-surface-headers \
-  iptsd \
-  linux-firmware-intel \
-  linux-firmware-marvell
-
-systemctl enable iptsd
-
-### COSMIC ###
-pacman -S --noconfirm \
-  cosmic \
-  cosmic-session \
-  cosmic-greeter \
-  greetd
-
-cat <<GREET > /etc/greetd/config.toml
-[terminal]
-vt = 1
-
-[default_session]
-command = "cosmic-greeter"
-user = "greeter"
-GREET
-
-systemctl enable greetd
-
-### GAMING + PERFORMANCE ###
-pacman -S --noconfirm \
-  steam \
-  gamescope \
-  gamemode \
-  lib32-gamemode \
-  mesa \
-  vulkan-intel \
-  intel-media-driver \
-  thermald \
-  zram-generator
-
-systemctl enable gamemoded thermald
-
-cat <<PERF > /etc/environment
-MESA_GLTHREAD=true
-ANV_QUEUE_THREAD_DISABLE=1
-INTEL_DEBUG=noccs
-PERF
-
-cat <<SYSCTL > /etc/sysctl.d/99-surface.conf
-vm.swappiness=10
-vm.vfs_cache_pressure=50
-vm.dirty_ratio=10
-vm.dirty_background_ratio=5
-SYSCTL
-
-cat <<ZRAM > /etc/systemd/zram-generator.conf
-[zram0]
-zram-size = ram / 2
-compression-algorithm = zstd
-swap-priority = 100
-ZRAM
-
-### UKI ###
-ROOT_UUID=\$(blkid -s UUID -o value \$(findmnt -no SOURCE /))
-
-mkdir -p /etc/kernel/cmdline
-echo "root=UUID=\$ROOT_UUID rw quiet splash" > /etc/kernel/cmdline/root.conf
-
-cat <<UKI > /etc/mkinitcpio.d/linux-surface.preset
-ALL_config="/etc/mkinitcpio.conf"
-ALL_kver="/usr/lib/modules/%k"
-PRESETS=('default')
-default_uki="/efi/EFI/Linux/arch-linux-surface.efi"
-UKI
-
+EOF
+pacman -Syu
+pacman -S --no-confirm linux-surface linux-surface-headers iptsd linux-firmware-intel sbctl
 mkinitcpio -P
-
-### SECURE BOOT ###
 sbctl create-keys
-sbctl enroll-keys --microsoft
-sbctl sign /efi/EFI/Linux/arch-linux-surface.efi
-
-bootctl install
-
-### UFW CONFIG ###
-# Set up UFW default rules: deny incoming, allow outgoing
+sbctl enroll-keys -m
+sbctl sign -s /boot/EFI/Linux/arch-linux.efi
+efibootmgr --create --disk /dev/nvme0n1 --part 1 --label "Arch Surface" --loader /EFI/Linux/arch-linux.efi --verbose
+systemctl enable ufw
+systemctl start ufw
+ufw enable
 ufw default deny incoming
 ufw default allow outgoing
-
-# Allow SSH (optional, only if you need remote access)
-ufw allow ssh
-
-# Enable UFW to start on boot
-systemctl enable ufw
-ufw enable
-
-EOF
-
-### FINISH ###
-umount -R /mnt
-echo "=== INSTALL COMPLETE ==="
-echo "Reboot, enable Secure Boot, enroll keys when prompted."
+pacman -S --no-confirm steam lib32-mesa lib32-vulkan-intel vulkan-tools lib32-vulkan-icd-loader lib32-gcc-libs gamemode lib32-gamemode ttf-liberation intel-media-driver lib32-intel-media-driver libva-utils thermald
+systemctl enable --now thermald
+dd if=/dev/zero of=/swapfile bs=1G count=16 status=progress
+chmod 0600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+sudo pacman -S cosmic
+echo " This will install all Cosmic- Desktop Environment. Press Enter!
+systemctl enable cosimic-greeter
+reboot now
