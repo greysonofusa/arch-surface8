@@ -1,8 +1,9 @@
-This is an install script for lightweight Arch Linux Gaming setups on Microsoft Surface Pro 8
+This is a POST - archinstall script for lightweight Arch Linux Gaming setups on Microsoft Surface Pro 8
 
 Pre Requisites:
 Microsoft Surface Pro 8 with arch linux installed using efistub and UKI bootloader with secureboot disabled and curl and git installed as additional packages.
 Partitioning scheme required single root partition and not a secondary home folder.
+archlinux must already be installed from the iso using archinstall
 
 
 The script installs: 
